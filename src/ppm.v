@@ -5,7 +5,7 @@
 
 `default_nettype none
 
-module ppm (
+module tt_um_ppm (
     input  wire [7:0] ui_in,    // 8-bit input: Pulse position (0 to 255)
     output wire [7:0] uo_out,   // Output: 1-bit pulse indicator (pulse on MSB bit)
     input  wire [7:0] uio_in,   // Not used
