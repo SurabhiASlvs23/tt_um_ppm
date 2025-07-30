@@ -1,92 +1,105 @@
-<!---
-
-This file is used to generate your project datasheet. Please fill in the information below and delete any unused
-sections.
-
-You can also include images in this folder and reference them in the markdown. Each image must be less than
-512 kb in size, and the combined size of all images must be less than 1 MB.
--->
 ## Credits
-We gratefully acknowledge the Center of Excellence (CoE) in Integrated Circuits and Systems (ICAS) and the Department of Electronics and Communication Engineering (ECE) for providing the necessary resources and guidance.
+
+We gratefully acknowledge the Center of Excellence (CoE) in Integrated Circuits and Systems (ICAS) and the Department of Electronics and Communication Engineering (ECE) for providing the necessary resources and guidance.  
 Special thanks to Dr. K. S. Geetha (Vice Principal) and Dr. K. N. Subramanya (Principal) for their constant encouragement and support in facilitating this Tiny Tapeout 8 submission.
 
 ## How it works
 
-The tt_um_ppm module implements an 8-bit Pulse Position Modulator (PPM), a scheme commonly used in wireless communications, servo control, and digital signaling. The PPM scheme modulates the position of a fixed-width pulse within a time window, depending on the input value.
+The `tt_um_sram_bist` module implements a basic Built-In Self-Test (BIST) mechanism for an 8-bit × 16-word internal SRAM. It uses a simple Finite State Machine (FSM) to write and read test patterns from the SRAM to verify memory integrity.
 
-In this design, the 8-bit input ui_in determines the position (time offset) of a single-cycle pulse within a 256-clock cycle frame. A counter runs from 0 to 255 continuously. When the counter value equals the ui_in input, the module asserts a 1-bit pulse on the output (uo_out[7]) for one clock cycle. All other bits of uo_out remain 0.
+The input control bus `ui_in` is structured as:
+- `[7]` → `start`: Initiates the BIST process.
+- `[6]` → `write_en`: Optional write enable for extending usage.
+- `[5:4]` → `mode`: Reserved for future modes of test (e.g., walking 1s/0s).
+- `[3:0]` → `data_in`: 4-bit test pattern (padded to 8 bits).
 
-The design is clock-driven and synchronous, with an active-low asynchronous reset (rst_n) to initialize the internal state.
+During the test:
+1. On `start`, the FSM writes the `data_in` pattern to all SRAM addresses (padded with `0000` in MSBs).
+2. Then it reads back each location and compares it with the expected value.
+3. If any mismatch is found, a fail flag is set.
+4. Upon completion, a `done` flag is raised.
+
+Outputs are delivered via `uo_out`:
+- `[7]` → `done`: Test complete indicator.
+- `[6]` → `fail`: Test failed flag.
+- `[5:0]` → Reserved/debug.
+
 ## Functional Description
-# Input and Output Port
+
+### Input and Output Ports
+
 - **Inputs:**
-  - `clk` – Clock signal (10 μs period or 100 KHz)
-  - `rst_n` – Active-low synchronous reset
-  - `ena` – Module enable
-  - `ui_in[7:0]` – Dedicated 8-bit input (data input)
-  - `uio_in[7:0]` – General-purpose IO input (unused)
+  - `clk` – System clock (e.g., 10 µs period or 100 kHz)
+  - `rst_n` – Active-low asynchronous reset
+  - `ena` – Always high (used internally to suppress unused signal warnings)
+  - `ui_in[7:0]` – Control input bus:
+    - `[7]` Start BIST
+    - `[6]` Write Enable (optional/future use)
+    - `[5:4]` Mode Select
+    - `[3:0]` Data Input (test pattern)
+  - `uio_in[7:0]` – Optional address input (only `uio_in[3:0]` used)
 
 - **Outputs:**
-  - `uo_out[7:0]` – 8-bit output representing generated PPM signal
-  - `uio_out[7:0]` – General-purpose IO output (unused)
-  - `uio_oe[7:0]` – Output enable for `uio_out` (unused)
-
-When `ena` is asserted and `rst_n` is deasserted, the module reads the input byte `ui_in` and encodes it into a single output pulse at a position (time slot) within the PPM frame. The output `uo_out` reflects this PPM behavior (only one bit is high at a time, the rest are low).
+  - `uo_out[7:0]` – BIST status output:
+    - `[7]` Done
+    - `[6]` Fail
+    - `[5:0]` Reserved/debug
+  - `uio_out[7:0]` – Unused, driven low
+  - `uio_oe[7:0]` – Output enable, all set to input (driven low)
 
 ## Internal Architecture
-# Counter Logic
-A simple 8-bit counter increments on every rising edge of the clock. It wraps around from 255 back to 0. The counter continuously cycles, forming a timing window.
 
-# Pulse Generation Logic
-Whenever the internal counter equals the value of ui_in, a single-cycle pulse is asserted on uo_out[7]. This pulse represents the encoded position, and all other outputs are zero. The system resets cleanly on rst_n.
+### FSM Operation
 
-# Reset Behavior
-When rst_n is deasserted (low):
+The module uses a simple 2-bit FSM with the following states:
+- `IDLE` – Wait for `start` signal
+- `WRITE` – Write `data_in` to all addresses
+- `READ` – Read and compare each address against expected pattern
+- `DONE` – Output `done` and `fail` flags
 
-The internal counter is reset to 0.
+### SRAM Array
 
-The pulse output is cleared.
+The design includes an internal 16×8-bit SRAM array (`mem[0:15]`). Writes and reads are synchronized with the clock.
 
-The system returns to a known initial state.
+### Output Encoding
 
-# Unused Logic Handling
-uio_in, ena, and other unused inputs are logically consumed using bitwise operations to suppress unused signal warnings.
+- When the BIST finishes, `uo_out[7]` is set high.
+- If any data mismatch is detected during read-back, `uo_out[6]` is also set high.
 
-uio_out and uio_oe are statically assigned to zero.
+### Reset Behavior
+
+- `rst_n` clears the FSM to IDLE.
+- Clears `fail` and `done` flags.
+- Resets address pointer.
 
 ## How to Test
 
-To verify the `tt_um_ppm` module, a testbench (`test.py`) written in **Cocotb** is used.  
-It sets up a clock, resets the module, provides values to `ui_in`, and checks whether the pulse appears at the correct time in `uo_out[7]`.
+A Cocotb-based Python testbench is recommended. The typical procedure is:
+
+1. Assert `rst_n` low → then high to initialize.
+2. Drive a value on `ui_in[3:0]` (e.g., `4'hA`).
+3. Assert `ui_in[7]` to start the test.
+4. Wait until `uo_out[7]` (done) is high.
+5. Check `uo_out[6]` to determine pass/fail.
 
 ---
 
 ### Example Test Scenarios
 
-| Time (clock cycles) | `ui_in` (Pulse Position) | Expected Behavior           |
-|----------------------|---------------------------|-----------------------------|
-| 0 – 10               | 0                         | Pulse at cycle 0            |
-| 10 – 266             | 20                        | Pulse at cycle 20           |
-| 266 – 522            | 100                       | Pulse at cycle 100          |
-| 522 – 778            | 255                       | Pulse at cycle 255          |
-| 778 – 1034           | 5                         | Pulse at cycle 5            |
+| Test Pattern | `ui_in[3:0]` | Behavior                      | Expected `uo_out` |
+|--------------|--------------|-------------------------------|-------------------|
+| `0xA`        | `4'b1010`    | All memory set to 0x0A        | Done=1, Fail=0    |
+| `0xF`        | `4'b1111`    | All memory set to 0x0F        | Done=1, Fail=0    |
+| Altered mem  | N/A          | Inject mismatch before READ   | Done=1, Fail=1    |
 
 ---
 
-### Observations
+### Simulation Monitoring
 
-- The **pulse is always one clock cycle wide**.
-- The output `uo_out[7]` is **asserted HIGH only when the internal counter equals `ui_in`**.
-- The remaining bits of `uo_out` **remain LOW** at all times.
-
----
-
-### Monitoring Output (Verilog)
-
-To trace the behavior during simulation, insert the following `$monitor` statement inside a Verilog testbench:
+To monitor values in simulation (Verilog), include:
 
 ```verilog
 initial begin
-    $monitor("Time=%0t | ui_in=%d counter=%d | pulse_out=%b",
-              $time, ui_in, counter, uo_out[7]);
+    $monitor("Time=%0t | Start=%b Addr=%d DataIn=0x%0h ReadBack=0x%0h | Done=%b Fail=%b",
+              $time, ui_in[7], addr, ui_in[3:0], mem[addr], uo_out[7], uo_out[6]);
 end
